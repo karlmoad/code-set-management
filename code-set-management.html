@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<link rel="import" href="../polymer/polymer.html">
+<link rel="import" href="../iron-icon/iron-icon.html">
+<link rel="import" href="../paper-button/paper-button.html">
+<link rel="import" href="../paper-icon-button/paper-icon-button.html">
+<link rel="import" href="../iron-data-table/iron-data-table.html">
+<link rel="import" href="../app-layout/app-drawer/app-drawer.html">
+<link rel="import" href="../app-layout/app-header-layout/app-header-layout.html">
+<link rel="import" href="../app-layout/app-drawer-layout/app-drawer-layout.html">
+<link rel="import" href="../app-layout/app-toolbar/app-toolbar.html">
+<link rel="import" href="../paper-dialog/paper-dialog.html">
+<link rel="import" href="../paper-input/paper-input.html">
+<link rel="import" href="../paper-toast/paper-toast.html">
+<link rel="import" href="./icons.html">
+<link rel="import" href="./code-set-edit.html">
+<script src="./serviceInterface.js"></script>
+
+<dom-module id="code-set-management">
+  <template>
+    <style>
+      :host {
+        display: block;
+      }
+
+      paper-dialog.editor{
+        width: 450px;
+        overflow: auto;
+      }
+      .toast-button {
+        text-transform: none;
+        color: #eeff41;
+      }
+    </style>
+    <app-header-layout fixed fullbleed>
+      <app-toolbar>
+        <div main-title>Code Set Management</div>
+        <paper-icon-button id="btnAdd" icon="add" on-tap="_openAdd"></paper-icon-button>
+      </app-toolbar>
+      <div class="grid">
+        <iron-data-table id="gridCodes" items="[[codes]]" selection-enabled>
+          <data-table-column width="90px" flex="0">
+            <template>
+              <div hidden="[[!selected]]">
+                <paper-icon-button icon="clear" on-tap="_delItem"></paper-icon-button>
+                <paper-icon-button icon="edit" on-tap="_editItem"></paper-icon-button>
+              </div>
+            </template>
+          </data-table-column>
+          <data-table-column name="Set" sort-by="set" filter-by="set">
+            <template>[[item.set]]</template>
+          </data-table-column>
+          <data-table-column name="Code" sort-by="id" filter-by="id">
+            <template>[[item.id]]</template>
+          </data-table-column>
+        </iron-data-table>
+      </div>
+      <footer style="position:fixed;bottom:0">
+        Note: All values are case sensitive hence code != CODE
+      </footer>
+    </app-header-layout>
+
+
+    <paper-dialog id="editorDialog" class="editor"  modal>
+      <code-set-edit id="editor" on-save="_saveEdit" on-cancel="_cancelEdit" code="[[code]]" editmode="[[editmode]]"></code-set-edit>
+    </paper-dialog>
+    <paper-dialog id="confirmDialog" class="confirm" modal>
+      <div class="message">Do you wish to delete this code, this action is can not be rolled back.</div>
+      <paper-input id="txtDel" label="Type the code id to confirm" auto-validate allowed-pattern="[a-zA-Z0-9]" error-message="Invalid entry"></paper-input>
+      <div class="buttons">
+        <paper-button on-tap="_declineDelete">Cancel</paper-button>
+        <paper-button on-tap="_acceptDelete">OK</paper-button>
+      </div>
+    </paper-dialog>
+    <paper-toast id="toast" duration="0">
+      <paper-icon-button icon="close" class="toast-button" on-tap="_closeToast"></paper-icon-button>
+    </paper-toast>
+
+
+  </template>
+
+  <script>
+    Polymer({
+
+      is: 'code-set-management',
+
+      properties: {
+        api: {
+          type: String
+        },
+        token:{
+          type: String
+        },
+        codes:{
+          type: Array,
+          value:[]
+        },
+      },
+      code:{},
+      editmode: true,
+      _acceptDelete: function(){
+        var c = this.$.gridCodes.selectedItem;
+        if(c.id === this.$.txtDel.value){
+          this.service.deleteCode(c,this._deleteCallback.bind(this));
+        }
+        else{
+          this.$.txtDel.invalid = true;
+        }
+
+      },
+      _closeToast: function(){
+        this.$.toast.close();
+      },
+      _declineDelete: function(){
+        this.$.confirmDialog.close();
+      },
+
+      _openAdd: function(){
+        this.code = {set:null, id:null, values: []};
+        this.editmode = false;
+        this.$.editor.reset();
+        this.$.editorDialog.open();
+      },
+      _editItem: function(){
+
+        //shit clone method to unhook reference and prohibit unwanted changes trickling upward
+        //More memory intensive but most compatible with all browsers given lack of ES6 support
+        this.code = JSON.parse(JSON.stringify(this.$.gridCodes.selectedItem));
+        this.editmode = true;
+        this.$.editor.reset();
+        this.$.editorDialog.open();
+      },
+      _delItem: function(){
+        this._resetConfirm();
+        this.$.confirmDialog.open();
+      },
+      _saveEdit: function(e){
+        this.$.editor.reset();
+        this.$.editorDialog.close();
+
+        this.service.saveCode(e.detail,this._saveCallback.bind(this));
+      },
+      _cancelEdit: function(){
+        this.$.editor.reset();
+        this.$.editorDialog.close();
+      },
+      _resetConfirm: function(){
+        this.$.txtDel.value="";
+      },
+      _deleteCallback: function(err, result){
+        var m="";
+
+        if(err){
+          m = err;
+        }
+        else{
+          m = result.message;
+          var idx = this.codes.indexOf(result.code);
+          this.splice("codes",idx,1);
+        }
+
+
+        this.$.toast.text = m ;
+        this.$.confirmDialog.close();
+        this._resetConfirm();
+        this.$.toast.open();
+        this.$.txtDel.invalid = false;
+
+      },
+      _findIndex: function(code){
+        for(var i =0; i< this.codes.length; i++){
+          var c = this.codes[i];
+
+          if(c.set === code.set && c.id===code.id){
+            return i;
+          }
+        }
+
+        return 0;
+      },
+      _saveCallback:function(err, result){
+        var m ="";
+
+        if(err){
+          m = err;
+        }else{
+          m = result.message;
+
+          if(result.edit){
+            var idx = this._findIndex(result.code);
+            this.splice('codes',idx,1,result.code);
+
+          }else{
+            this.push('codes', result.code);
+            this.$.gridCodes.size = this.codes.length;
+          }
+        }
+
+        this.$.toast.text = m ;
+        this.$.toast.open();
+      },
+      _getData: function(err, r){
+        if(!err){
+          this.$.toast.text = "";
+          this.$.toast.close();
+          this.$.btnAdd.disabled = false;
+
+          this.codes = r;
+          this.$.gridCodes.size = this.codes.length;
+        }else{
+          //something went wrong show error toast and disable add
+          this.$.toast.text = "Error occurred contacting server";
+          this.$.toast.open();
+          this.$.btnAdd.disabled= true;
+        }
+      },
+
+      load: function(){
+        this.service = new ServiceInterface(this.api, this.token);
+        this.service.getCodes(this._getData.bind(this));
+      },
+      ready:function(){
+
+      }
+    });
+  </script>
+</dom-module>
